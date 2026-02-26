@@ -1,1 +1,0 @@
-# gohar-dl-bot
