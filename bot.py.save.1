@@ -1,0 +1,41 @@
+import telebot
+import yt_dlp
+import os
+
+TOKEN = "8692916296:AAGZ841Urz__nCggrMdUd7DNxXzP3qC8dqA"
+
+bot = telebot.TeleBot(TOKEN)
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "🔥 أرسل رابط يوتيوب للتحميل")
+
+@bot.message_handler(func=lambda message: True)
+def download_video(message):
+    url = message.text
+
+    bot.reply_to(message, "⏳ جاري التحميل...")
+
+    try:
+        options = {
+            'format': 'bestvideo+bestaudio/best',
+            'outtmpl': '%(title)s.%(ext)s'
+        }
+
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+
+        bot.send_video(message.chat.id, open(filename, "rb"))
+
+        os.remove(filename)
+
+    except Exception as e:
+        bot.reply_to(message, "❌ فشل التحميل")
+
+bot.infinity_polling()
+
+COOKIES_FILE = Nonepkg update -y
+pkg install python ffmpeg -y
+pip install -U pyTelegramBotAPI yt-dlp
+

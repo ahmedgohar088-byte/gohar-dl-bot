@@ -1,0 +1,329 @@
+
+Telegram Downloader Bot (YouTube / TikTok / Instagram / Facebook / X) via yt-dlp
+
+Features:
+- Shows: title + uploader + duration + (approx sizes if available)
+- Quality selection is REQUIRED (no "best quality" auto-download)
+- Video qualities list starts from MIN_QUALITY_P (default 480p)
+- Audio-only MP3 option
+- Progress bar while downloading
+- Duration limit set to 3 hours
+- No cookies (works for public/allowed content)
+"""
+
+import os
+import re
+import time
+import threading
+
+import telebot
+import yt_dlp
+
+# =======================
+# 1) SETTINGS
+# ============E"      # <-- ضع التوكن هنا
+
+DOWNLOAD_DIR = "downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+MAX_DURATION_SEC = 3 * 60 * 60     # 3 hours
+MAX_FILE_MB = 1800                 # safety: avoid sending huge files
+		MIN_QUALITY_P = 480                # show video qualities from 480p and above
+
+COOKIES_FILE = None                # keep Non(chat_id, msg_id) -> dict(url, title, duration, q_to_fmt, q
+# =====================
+def fmt_dur(sec: int) > str:
+    if not se
+        retun "غير معروف"
+    sec = t(sec)
+    m, s divmod(sec, 60)
+    h,  = divmod(m, 60)
+    rurn f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}
+def bytes_to_mb(b: int
+    if not b
+        rern None
+    retur b / (1024 * 1024
+def fmt_mb(filesize_byte int) -> str:
+    m = bytes_to_mb(fisize_bytes)
+    return f"{m:.1f} B" if m is not None else "غير معروف
+def progress_bar(pct: float) -> st
+    filled = int(round(pct / 10
+    filled = max(0, min(10, filed))
+    return "▰" * filled + "▱* (10 - filled
+def pick_bucket(height
+    # round to commonlabels for buttons
+    if not heigh
+        return one
+    common = 44, 240, 360, 480, 720, 1080, 1440, 2160]
+    for q incommon:
+        ifeight <= q:
+          return q
+    retrn 216
+# =====================
+#  (MP4 progressive: video+audio)
+=======================def build_video_choices(info):
+    "
+    refer progressive MP4 (v+a) because it's easiest to send to Telegram.
+  Returns:
+    qs_sorted, q_to_fmt, q_sizes    """
+    formats = info.get("format) or []
+    q_to_fmt = {
+    q_sizes = 
+    for f inormats:
+        if.get("ext") != "mp4":
+           continue
+       f f.get("vcodec") == "none" or f.get("acodec") == "none":
+           continu
+        h = f.ge"height")
+        q = pic_bucket(h)
+        if noq:
+            ontinu
+        fmt_id = .get("format_id")
+        if not t_id:
+            ctinue
+        # store e format_id per quality label
+        # if mutiple exist, keep the first; size we keep the max available
+        if q t in q_to_fmt:
+            _to_fmt[q] = fmt_i
+        fs = f.get("filesize or f.get("filesize_approx")
+        if fs
+           _sizes[q] = max(q_sizes.get(q, 0) or 0, fs)
+    qs = sorted(q_to_fmt.keys(
+    return qs, q_to_fmt, q_si
+# ======================
+# 6) Progress tracker pdates Telegram message)
+# ======================
+class ProgressTrack:
+    def __init__(slf, chat_id, status_msg_id):
+        self.chaid = chat_id
+        self.stus_msg_id = status_msg_id
+        self.ast_edit = 0
+        sellast_text = ""
+    def hook(self, d
+        if d.get("satus") != "downloading":
+            ret
+        total  d.get("total_bytes") or d.get("total_bytes_estimate")
+        downaded = d.get("downloaded_bytes") or 0
+        if ot total:
+          return
+        pct = ownloaded / total) * 100
+        now time.time()
+        # update at mt every 2 seconds
+        if now - se.last_edit < 2:
+            retu
+        bar = pogress_bar(pct)
+        spd =.get("speed") or 0
+        eta  d.get("eta"
+        spd_txt = f"{bes_to_mb(spd):.2f} MB/s" if spd else "؟"
+        eta_txt = f"{ta}s" if eta is not None else "؟
+        text = f"⏳ جاري التحميل...\n{bar} {pct:.1f}\n🚀 السرعة: {spd_txt}\n⏱️ ETA: {eta_txt}"
+        if text != self.last_tex
+            try
+              bot.edit_message_text(text, self.chat_id, self.status_msg_id)
+              self.last_text = text
+               self.last_edit = now
+          except:
+               pas
+# =====================
+# 7) Send withize limit
+# ======================
+def send_wi_limit(chat_id, file_path, mode):
+	    s
+        if path and os.path.exists(path):
+            os.remove(path)
+    except:
+        pass
+
+
+# =======================
+# 8) Download worker (thread)
+# =======================
+def run_download(chat_id, origin_msg_id, mode, fmt_id=None):
+    status = bot.send_message(chat_id, "⏳ جاري التحميل...")
+
+    tracker = ProgressTracker(chat_id, status.message_id)
+
+    ts = int(time.time())
+    outtmpl = os.path.join(DOWNLOAD_DIR, f"%(title).80s_{ts}.%(ext)s")
+
+    base_opts = {
+        "quiet": True,
+        "noplaylist": True,
+        "outtmpl": outtmpl,
+        "progress_hooks": [tracker.hook],
+    }
+    if COOKIES_FILE:
+        base_opts["cookiefile"] = COOKIES_FILE
+
+    try:
+        st = STATE.get((chat_id, origin_msg_id))
+        if not st:
+            bot.edit_message_text("❌ الرابط انتهت صلاحيته. ابعته تاني.", chat_id, status.message_id)
+            return
+
+        url = st["url"]
+
+        if mode == "audio":
+            opts = {
+                **base_opts,
+                "format": "bestaudio/best",
+                "postprocessors": [
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}
+                ],
+            }
+        else:
+            # REQUIRED quality: we must have fmt_id
+            if not fmt_id:
+                bot.edit_message_text("❌ لازم تختار جودة فيديو من الأزرار.", chat_id, status.message_id)
+                return
+            opts = {**base_opts, "format": f"{fmt_id}"}
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info)
+
+        # audio final file usually becomes mp3 after postprocess
+        if mode == "audio":
+            base, _ = os.path.splitext(file_path)
+            mp3 = base + ".mp3"
+            if os.path.exists(mp3):
+                file_path = mp3
+
+        ok = send_with_limit(chat_id, file_path, mode)
+        bot.edit_message_text("✅ تم الإرسال!" if ok else "⚠️ تم التحميل لكن فشل الإرسال/الحجم كبير.", chat_id, status.message_id)
+
+        safe_remove(file_path)
+
+    except Exception as e:
+        bot.edit_message_text(f"❌ فشل التحميل: {type(e).__name__}", chat_id, status.message_id)
+
+
+# =======================
+# 9) Commands
+# =======================
+@bot.message_handler(commands=["start", "help"])
+def start(message):
+    bot.reply_to(
+        message,
+        "👋 ابعت رابط من: YouTube / TikTok / Instagram / Facebook / X\n"
+        "هعرض العنوان + المدة + الأحجام (لو متاحة)\n"
+        "وتختار جودة الفيديو (من 480p وطالع) أو صوت MP3.\n"
+        "⚠️ ملاحظة: بدون cookies، الروابط الخاصة/المقفولة ممكن تفشل."
+    )
+
+
+# =======================
+# 10) Handle URL messages
+# =======================
+@bot.message_handler(func=lambda m: bool(m.text and URL_RE.search(m.text)))
+def on_url(message):
+    url = URL_RE.search(message.text).group(1).strip()
+    bot.reply_to(message, "🔎 بفحص الرابط...")
+
+    try:
+        info = extract_info(url)
+
+        title = info.get("title", "بدون عنوان")
+        duration = info.get("duration") or 0
+        uploader = info.get("uploader") or info.get("channel") or "غير معروف"
+
+        if duration and duration > MAX_DURATION_SEC:
+            bot.reply_to(message, f"❌ المدة طويلة جدًا ({fmt_dur(duration)}). الحد الأقصى 3 ساعات.")
+            return
+
+        qs, q_to_fmt, q_sizes = build_video_choices(info)
+
+        # keep only qualities from MIN_QUALITY_P and up
+        qs_shown = [q for q in qs if q >= MIN_QUALITY_P]
+
+        lines = [
+            "✅ تم العثور على المحتوى:",
+            f"• العنوان: {title}",
+            f"• الحساب/القناة: {uploader}",            f"• المدة: {fmt_dur(duration)}",
+            "",
+            f"🎥 اختر الجودة (من {MIN_QUALITY_P}p وطالع):"
+        ]
+
+        kb = telebot.types.InlineKeyboardMarkup(row_width=2)
+
+        if qs_shown:
+            # list all available qualities >= MIN_QUALITY_P
+            for q in qs_shown:
+                size_txt = fmt_mb(q_sizes.get(q))
+                kb.add(
+                    telebot.types.InlineKeyboardButton(
+                        f"🎥 {q}p ({size_txt})",
+                        callback_data=f"v|{message.chat.id}|{message.message_id}|{q}"
+                    )
+                )
+        else:
+            lines.append("⚠️ لم أجد جودات MP4 مناسبة للاختيار (بدون أفضل جودة تلقائيًا).")
+            lines.append("جرب رابط آخر أو استخدم صوت MP3.")
+
+        # audio button always available
+        kb.add(
+            telebot.types.InlineKeyboardButton(
+                "🎧 صوت MP3",
+                callback_data=f"a|{message.chat.id}|{message.message_id}|0"
+            )
+        )
+
+        bot.send_message(message.chat.id, "\n".join(lines), reply_markup=kb)
+
+        STATE[(message.chat.id, message.message_id)] = {
+            "url": url,
+            "title": title,
+            "duration": duration,
+            "q_to_fmt": q_to_fmt,
+            "q_sizes": q_sizes,
+        }
+
+    except Exception as e:
+        bot.reply_to(message, f"❌ فشل قراءة الرابط.\n{type(e).__name__}")
+
+
+# =======================
+# 11) Button callbacks
+# =======================
+@bot.callback_query_handler(func=lambda call: True)
+def on_cb(call):
+    try:
+        parts = call.data.split("|")
+        kind = parts[0]        # v / a
+        chat_id = int(parts[1])
+        msg_id = int(parts[2])
+        q = int(parts[3])
+
+        st = STATE.get((chat_id, msg_id))
+        if not st:
+            bot.answer_callback_query(call.id, "الرابط انتهت صلاحيته. ابعته تاني.")
+            return
+
+        bot.answer_callback_query(call.id, "⏳ تمام، ببدأ التحميل...")
+
+        if kind == "a":
+            t = threading.Thread(target=run_download, args=(chat_id, msg_id, "audio", None), daemon=True)
+            t.start()
+            return
+
+        if kind == "v":
+            fmt_id = st["q_to_fmt"].get(q)
+            if not fmt_id:
+                bot.answer_callback_query(call.id, "❌ الجودة غير متاحة. ابعت الرابط تاني.")
+                return
+            t = threading.Thread(target=run_download, args=(chat_id, msg_id, "video", fmt_id), daemon=True)
+            t.start()
+            return
+
+    except:
+        try:
+            bot.answer_callback_query(call.id, "❌ حصل خطأ.")
+        except:
+            pass
+
+
+# =======================
+# 12) Run
+# =======================
+print("Bot running...")
+bot.infinity_polling()

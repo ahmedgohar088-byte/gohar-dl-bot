@@ -1,0 +1,2 @@
+nano bot.py
+
