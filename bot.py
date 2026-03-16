@@ -522,3 +522,21 @@ def dl_cb(call):
 
 print("Bot running...")
 bot.infinity_polling()
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+
+    banner = open("assets/platforms_banner.png", "rb")
+
+    text = """
+🟢 GOHAR-DL // ONLINE
+
+📌 Supported:
+YouTube | TikTok | Instagram | Facebook | X
+
+⏱ Max duration: 3h
+🎚 Min quality: 480p
+
+Send a link ↓
+"""
+
+    bot.send_photo(message.chat.id, banner, caption=text)
